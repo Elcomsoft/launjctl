@@ -1,6 +1,13 @@
-#include <xpc/xpc.h>
+// #include <xpc/xpc.h>
 #include <mach/task.h>
 #include <objc/objc.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <dlfcn.h>
+
+#ifdef __aarch64__
+#define ARM64
+#endif
 
 #ifdef X86_64
 #define _64	1
@@ -10,7 +17,51 @@
 #define _64	1
 #endif
 
-#define JDEBUG	1
+// #define JDEBUG	1
+
+typedef void* xpc_object_t;
+typedef void* xpc_type_t;
+typedef void* launch_data_t;
+typedef bool (^xpc_dictionary_applier_t)(const char *key, xpc_object_t value);
+
+xpc_object_t xpc_dictionary_create(const char * const *keys, const xpc_object_t *values, size_t count);
+void xpc_dictionary_set_uint64(xpc_object_t dictionary, const char *key, uint64_t value);
+void xpc_dictionary_set_string(xpc_object_t dictionary, const char *key, const char *value);
+int64_t xpc_dictionary_get_int64(xpc_object_t dictionary, const char *key);
+xpc_object_t xpc_dictionary_get_value(xpc_object_t dictionary, const char *key);
+bool xpc_dictionary_get_bool(xpc_object_t dictionary, const char *key);
+void xpc_dictionary_set_fd(xpc_object_t dictionary, const char *key, int value);
+void xpc_dictionary_set_bool(xpc_object_t dictionary, const char *key, bool value);
+const char *xpc_dictionary_get_string(xpc_object_t dictionary, const char *key);
+void xpc_dictionary_set_value(xpc_object_t dictionary, const char *key, xpc_object_t value);
+xpc_type_t xpc_get_type(xpc_object_t object);
+bool xpc_dictionary_apply(xpc_object_t xdict, xpc_dictionary_applier_t applier);
+int64_t xpc_int64_get_value(xpc_object_t xint);
+char *xpc_copy_description(xpc_object_t object);
+void xpc_dictionary_set_int64(xpc_object_t dictionary, const char *key, int64_t value);
+const char *xpc_string_get_string_ptr(xpc_object_t xstring);
+xpc_object_t xpc_array_create(const xpc_object_t *objects, size_t count);
+xpc_object_t xpc_string_create(const char *string);
+size_t xpc_dictionary_get_count(xpc_object_t dictionary);
+
+#define XPC_ARRAY_APPEND ((size_t)(-1))
+#define XPC_ERROR_CONNECTION_INVALID XPC_GLOBAL_OBJECT(_xpc_error_connection_invalid)
+#define XPC_ERROR_TERMINATION_IMMINENT XPC_GLOBAL_OBJECT(_xpc_error_termination_imminent)
+#define XPC_TYPE_ARRAY (&_xpc_type_array)
+#define XPC_TYPE_BOOL (&_xpc_type_bool)
+#define XPC_TYPE_DICTIONARY (&_xpc_type_dictionary)
+#define XPC_TYPE_ERROR (&_xpc_type_error)
+#define XPC_TYPE_STRING (&_xpc_type_string)
+
+
+extern const struct _xpc_dictionary_s _xpc_error_connection_invalid;
+extern const struct _xpc_dictionary_s _xpc_error_termination_imminent;
+extern const struct _xpc_type_s _xpc_type_array;
+extern const struct _xpc_type_s _xpc_type_bool;
+extern const struct _xpc_type_s _xpc_type_dictionary;
+extern const struct _xpc_type_s _xpc_type_error;
+extern const struct _xpc_type_s _xpc_type_string;
+
 
 //
 // jlaunchctl: launchctl(1) clone to interface with launchd (2.0.0 +)
@@ -18,7 +69,7 @@
 // Author: J Levin, NewOSXBook.com.
 //
 // Original author: An unsung hero @AAPL. But hey, this is almost the same as his code :)
-// 
+//
 // Why: because launchctl source has been closed as of 10.10/8.0, and it's unavailable for iOS -
 //      where it might actually be very very useful (*nudge*, *nudge*, *wink*, *wink*)
 //
@@ -30,7 +81,7 @@
 //  			or
 // 	gcc-iphone -Wall jlctl.c -o jlctl
 //
-// Note: Apple removed more headers from the iOS SDK (e.g. <xpc/xpc.h> and <launch.h>). 
+// Note: Apple removed more headers from the iOS SDK (e.g. <xpc/xpc.h> and <launch.h>).
 // You'll need to copy them over from the Mac OS X SDK if you want the iOS version to compile..
 //
 // Disclaimer: I didn't implement all the launchctl commands - only the most useful ones
@@ -38,28 +89,28 @@
 // Promise: Stay tuned for launchd(8) - to be open-sourced once again, for MOXiI 2)
 //
 // License: Free. Use it, by all means. And if you do find it useful, let me know.
-//          Likewise if you want a feature/command 
+//          Likewise if you want a feature/command
 //
-// ChangeLog: Fix for 32-bit (That's for you, rdacted) 
+// ChangeLog: Fix for 32-bit (That's for you, rdacted)
 //
 //            10/09/2017 - Updated for Darwin 17 (some routines renumbered!)
 //                         hostinfo now works better than original (AAPL, please take my code)
 //			   full set of launchctl routines
-// 
+//
 //
 
 __attribute((used)) const char *ver[]  = {
 	"@(#) PROGRAM:jlaunchctl  PROJECT:libjpc-1205.1.10",
 
 #ifdef X86_64
-	"@(#) VERSION:Darwin Bootstrapper Control Interface Version 5.0.0: Mon Jul 31 17:29:58 PDT 2017; root:libjpc_executables-1205.1.10~25/jlaunchctl/RELEASE_X86_64" 
+	"@(#) VERSION:Darwin Bootstrapper Control Interface Version 5.0.0: Mon Jul 31 17:29:58 PDT 2017; root:libjpc_executables-1205.1.10~25/jlaunchctl/RELEASE_X86_64"
 #endif
 #ifdef ARM
-	"@(#) VERSION:Darwin Bootstrapper Control Interface Version 5.0.0: Mon Jul 31 17:29:58 PDT 2017; root:libjpc_executables-1205.1.10~25/jlaunchctl/RELEASE_ARM" 
+	"@(#) VERSION:Darwin Bootstrapper Control Interface Version 5.0.0: Mon Jul 31 17:29:58 PDT 2017; root:libjpc_executables-1205.1.10~25/jlaunchctl/RELEASE_ARM"
 #endif
 
 #ifdef ARM64
-	"@(#) VERSION:Darwin Bootstrapper Control Interface Version 5.0.0: Mon Jul 31 17:29:58 PDT 2017; root:libjpc_executables-1205.1.10~25/jlaunchctl/RELEASE_ARM64" 
+	"@(#) VERSION:Darwin Bootstrapper Control Interface Version 5.0.0: Mon Jul 31 17:29:58 PDT 2017; root:libjpc_executables-1205.1.10~25/jlaunchctl/RELEASE_ARM64"
 #endif
 
 
@@ -70,10 +121,12 @@ __attribute((used)) const char *ver[]  = {
 extern void *objc_retain (void *);
 extern int xpc_pipe_routine (xpc_object_t *xpc_pipe, xpc_object_t *inDict, xpc_object_t **out);
 extern char *xpc_strerror (int);
-extern int csr_check (int what);
+static int (*csr_check)(int what) = NULL;
+
+
 
 // imported from jUtils - this will compile cleanly without it.
-void dumpDict (const char *DictName,  xpc_object_t    *dict);
+void dumpDict (const char *DictName,  xpc_object_t    *dict){}
 
 // This is undocumented, but sooooo useful :)
 extern mach_port_t xpc_dictionary_copy_mach_send(xpc_object_t, char *key);
@@ -196,8 +249,8 @@ int do_status (char *ServiceName)
 			return 0;
 		}
 
-	
-		
+
+
 		// Still here? That means we need to show loaded, enabled
 		int loaded = xpc_dictionary_get_bool(outDict,"loaded");
 		int enabled = xpc_dictionary_get_bool(outDict,"enabled");
@@ -207,7 +260,7 @@ int do_status (char *ServiceName)
 			(loaded) ?"": "not ",
 			(enabled)?"": "not ");
 
-	
+
 		return 0;
 	}
        return (err);
@@ -238,7 +291,7 @@ int do_attach (char *ServiceName)
 0x1002001b8: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
 0x1002001c8: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
 
-#endif 
+#endif
  printf("@TODO - tell J he forgot this, or complete it yourself :-)\n");
  return (0);
 }
@@ -257,15 +310,15 @@ int do_dumpjpcategory (void)
 0x15ce005d8: 72 6f 75 74 69 6e 65 00 00 40 00 00 46 03 00 00  routine..@..F...
 0x15ce005e8: 00 00 00 00 74 79 70 65 00 00 00 00 00 40 00 00  ....type.....@..
 0x15ce005f8: 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
-(lldb) 
-#endif 
+(lldb)
+#endif
 
    xpc_object_t dict = xpc_dictionary_create(NULL,  // const char * const *keys,
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
 
    // And here are the human readable arguments:
-   // Args: 
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_uint64(dict, "type",1);                      // set to 1
    xpc_dictionary_set_uint64(dict, "handle",0); 		   // can be 0 - for system
@@ -307,7 +360,7 @@ int do_dumpstate (void)
 0x100200198: 00 00 00 00 74 79 70 65 00 00 00 00 00 40 00 00  ....type.....@..
 0x1002001a8: 01 00 00 00 00 00 00 00 03 0a 00 00 00 00 00 00  ................
 #endif
-    // Funny. This was iOS 9 only and on dev builds, as 0x343. 
+    // Funny. This was iOS 9 only and on dev builds, as 0x343.
     // In 1205 I have this working as 0x842, on release. *shrug*
 
    xpc_object_t dict = xpc_dictionary_create(NULL,  // const char * const *keys,
@@ -315,7 +368,7 @@ int do_dumpstate (void)
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
    // And here are the human readable arguments:
-   // Args: 
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_uint64(dict, "type",1);                      // set to 1
    xpc_dictionary_set_uint64(dict, "handle",0); 		   // can be 0 - for system
@@ -348,15 +401,15 @@ int do_wholaunched(char *Pid)
    xpc_object_t dict = xpc_dictionary_create(NULL,  // const char * const *keys,
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
-	
+
    // This would be handled by xpc_service_routine, the way I do it on OpenXPC
    // but it's unexported, so I recreate this
-	
+
     // <dictionary: 0x100102b20> { count = 5, transaction: 0, voucher = 0x0, contents =\n\t"subsystem" => <uint64: 0x100102af0>: 2\n\t"handle" => <uint64: 0x100102080>: 15583\n\t"routine" => <uint64: 0x100102c20>: 711\n\t"self" => <bool: 0x7fff9e9dbb28>: true\n\t"type" => <uint64: 0x100102030>: 5\n}"
 
    xpc_dictionary_set_uint64 (dict, "subsystem", 2);               // subsystem (3)
    xpc_dictionary_set_bool(dict, "self",0);                      // not for ourselves
-   xpc_dictionary_set_uint64(dict, "type",5); 		   
+   xpc_dictionary_set_uint64(dict, "type",5);
    xpc_dictionary_set_uint64(dict, "handle",atoi(Pid));   // pid
    xpc_dictionary_set_uint64(dict, "routine", 711);
 
@@ -422,7 +475,7 @@ subsystem: 3
 
 	};
 	return 0;
-	
+
 } // do_getenv
 
 int do_setenv	(char *EnvVar,char *Val)
@@ -484,7 +537,7 @@ int do_start	(char *ServiceName,int StartStop)
 
 #if 0
   // For your debugging pleasure: the dump of the start/stop message,
-  // obtained by breaking on xpc_pipe_routine, then setting an additional 
+  // obtained by breaking on xpc_pipe_routine, then setting an additional
   // breakpoint on mach_msg, and reading the third mach_msg()'s first argument
   // (In other words, the message sent by the first actual message down the
   // XPC pipe)
@@ -502,7 +555,7 @@ int do_start	(char *ServiceName,int StartStop)
 0x1002001b8: 00 00 00 00 6c 65 67 61 63 79 00 00 00 20 00 00  ....legacy... ..
 #endif
    // And here are the human readable arguments:
-   // Args: 
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_uint64(dict, "type",1);                      // set to 1
    xpc_dictionary_set_uint64(dict, "handle",0); 		   // can be 0 - for system
@@ -527,7 +580,7 @@ int do_start	(char *ServiceName,int StartStop)
 
    return (0);
 
-} //do_start 
+} //do_start
 
 int do_examine (void)
 {
@@ -549,7 +602,7 @@ int do_examine (void)
 
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_uint64(dict, "handle",0); 		   // system (uid 0)
-   xpc_dictionary_set_uint64(dict, "type", 1);                         // 
+   xpc_dictionary_set_uint64(dict, "type", 1);                         //
    xpc_dictionary_set_uint64(dict, "routine", ROUTINE_EXAMINE);      // routine (0x33a
 
    xpc_object_t	*outDict = NULL;
@@ -602,7 +655,7 @@ int do_list	(char *ServiceName)
 
 
 #endif
-   // Args: 
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_uint64(dict, "handle",0); 		   // can be 0 - for system
    xpc_dictionary_set_uint64(dict, "routine", ROUTINE_LIST);      // routine (0x32f)
@@ -629,7 +682,7 @@ else
 	{
 
 		// We actually got a reply!
-		xpc_object_t	svcs = xpc_dictionary_get_value(outDict, //xpc_object_t dictionary, 
+		xpc_object_t	svcs = xpc_dictionary_get_value(outDict, //xpc_object_t dictionary,
 					       ServiceName ? "service" : "services"); //replyKey); //const char *key);
 
 		if (!svcs)
@@ -645,9 +698,9 @@ else
 		if (!ServiceName) {
 			printf("PID\tStatus\tLabel\n");
 
-		xpc_dictionary_apply(svcs, ^ bool (const char *key, xpc_object_t value) 
+		xpc_dictionary_apply(svcs, ^ bool (const char *key, xpc_object_t value)
 		{
-			
+
 			// value is a nested dictionary. @TODO: check that. Bleh
 			xpc_dictionary_apply(value, ^bool (const char *key, xpc_object_t value1)
 			{
@@ -666,8 +719,8 @@ else
 
 
 		}
-		
-		
+
+
 
 	}
        return (err);
@@ -695,7 +748,7 @@ int do_resolve	(pid_t Pid, int Name)
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
 
-   // Args: 
+   // Args:
 
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_uint64(dict, "type",1);                      // set to 1
@@ -726,7 +779,7 @@ int do_arbitrary	(int Routine)
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
 
-   // Args: 
+   // Args:
 
    int subsys = Routine / 0x100; // integer division fine
    xpc_dictionary_set_uint64 (dict, "subsystem", subsys );               // subsystem (3)
@@ -759,7 +812,7 @@ int do_limit	(void)
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
 
-   // Args: 
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_bool(dict, "print",1);                       // true, naturally
    xpc_dictionary_set_uint64(dict, "type",1);                      // set to 1
@@ -798,14 +851,14 @@ int do_asuser (int Uid, char *Cmd)
 0x100200610: 00 00 00 00 00 40 00 00 01 00 00 00 00 00 00 00  .....@..........
 0x100200620: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
 #endif
-  // This one is a bit different: it first uses a message to get the 
+  // This one is a bit different: it first uses a message to get the
   // bootstrap and exception ports for the UID:
 
    xpc_object_t dict = xpc_dictionary_create(NULL,  // const char * const *keys,
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
    xpc_dictionary_set_uint64(dict, "routine",ROUTINE_ASUSER); // routine   (0x344)
-   xpc_dictionary_set_uint64 (dict, "type", 1);                
+   xpc_dictionary_set_uint64 (dict, "type", 1);
    xpc_dictionary_set_uint64 (dict, "handle", 0);                // 0 = system
    xpc_dictionary_set_uint64 (dict, "uid", 0);                // 0 = system
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);                // subsystem (2)
@@ -819,7 +872,7 @@ int do_asuser (int Uid, char *Cmd)
    if (rc == 0) {
 
        int err = xpc_dictionary_get_int64 (outDict, "error");
-  
+
        if (err) {printf("Error:  %d - %s\n", err, xpc_strerror(err)); return (err);}
 	if (jdebug && outDict) { fprintf(stderr, "%s", xpc_copy_description(outDict));}
 		mach_port_t excp = xpc_dictionary_copy_mach_send (outDict, "exception");
@@ -854,11 +907,11 @@ int do_kill (char *Signal, char *ServiceName)
 #endif
 
    xpc_dictionary_set_uint64(dict, "routine",ROUTINE_KILL); // routine   (0x32c)
-   xpc_dictionary_set_uint64 (dict, "type", 1);                
+   xpc_dictionary_set_uint64 (dict, "type", 1);
    xpc_dictionary_set_uint64 (dict, "handle", 0);                // 0 = system
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);                // subsystem (3)
-   xpc_dictionary_set_string (dict, "name", ServiceName);	 
-   xpc_dictionary_set_int64 (dict, "signal", atoi(Signal));	 
+   xpc_dictionary_set_string (dict, "name", ServiceName);
+   xpc_dictionary_set_int64 (dict, "signal", atoi(Signal));
 
    xpc_object_t	*outDict = NULL;
 
@@ -866,7 +919,7 @@ int do_kill (char *Signal, char *ServiceName)
 
    int rc = xpc_pipe_routine (xpc_gd->xpc_bootstrap_pipe, dict, &outDict);
 
-  
+
    if (rc == 0) {
        rc = xpc_dictionary_get_int64 (outDict, "error");
        if (rc) {printf("Error:  %d - %s\n", rc, xpc_strerror(rc)); return (rc);}
@@ -896,10 +949,10 @@ Mon Oct  9 15:45:31 2017 ==pr==> <pipe: 0x7ff1c44020c0> { name =  }
 
 
    xpc_dictionary_set_uint64(dict, "routine",ROUTINE_DEBUG);
-   xpc_dictionary_set_uint64 (dict, "type", 1);                
+   xpc_dictionary_set_uint64 (dict, "type", 1);
    xpc_dictionary_set_uint64 (dict, "handle", Handle);                // 0 = system
    xpc_dictionary_set_uint64 (dict, "subsystem", 2);                // subsystem (2)
-   xpc_dictionary_set_string (dict, "name", ServiceName);	 
+   xpc_dictionary_set_string (dict, "name", ServiceName);
 
 
    xpc_object_t	*outDict = NULL;
@@ -911,7 +964,7 @@ Mon Oct  9 15:45:31 2017 ==pr==> <pipe: 0x7ff1c44020c0> { name =  }
    if (rc == 0) {
        int err = xpc_dictionary_get_int64 (outDict, "error");
        if (err) {printf("Error:  %d - %s\n", err, xpc_strerror(err)); return (err);}
-	
+
    printf("Service configured for next launch.\n");
 
        return (err);
@@ -938,13 +991,13 @@ int do_blame (char *ServiceName, int Uid)
 0x100200198: 61 70 70 6c 65 2e 6b 65 78 74 64 00 74 79 70 65  apple.kextd.type
 0x1002001a8: 00 00 00 00 00 40 00 00 01 00 00 00 00 00 00 00  .....@..........
 #endif
-   // Args: 
+   // Args:
 
    xpc_dictionary_set_uint64(dict, "routine",ROUTINE_BLAME); // routine   (0x2c3)
-   xpc_dictionary_set_uint64 (dict, "type", 1);                
+   xpc_dictionary_set_uint64 (dict, "type", 1);
    xpc_dictionary_set_uint64 (dict, "handle", Uid);                // 0 = system
    xpc_dictionary_set_uint64 (dict, "subsystem", 2);                // subsystem (2)
-   xpc_dictionary_set_string (dict, "name", ServiceName);	 
+   xpc_dictionary_set_string (dict, "name", ServiceName);
 
 
    xpc_object_t	*outDict = NULL;
@@ -956,18 +1009,18 @@ int do_blame (char *ServiceName, int Uid)
    if (rc == 0) {
        int err = xpc_dictionary_get_int64 (outDict, "error");
        if (err) {printf("Error:  %d - %s\n", err, xpc_strerror(err)); return (err);}
-	
-	xpc_object_t	reason = xpc_dictionary_get_value(outDict, //xpc_object_t dictionary, 
+
+	xpc_object_t	reason = xpc_dictionary_get_value(outDict, //xpc_object_t dictionary,
 					       "reason"); //const char *key);
 	 printf("%s\n",xpc_string_get_string_ptr(reason));
 
 
        return (err);
-	
+
    } // outDict
 
    return (0);
-} // do blame 
+} // do blame
 
 
 int do_procinfo (unsigned long pid)
@@ -976,7 +1029,7 @@ int do_procinfo (unsigned long pid)
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
 
-   // Args: 
+   // Args:
 
 
    xpc_dictionary_set_uint64(dict, "routine",ROUTINE_DUMP_PROCESS); // routine   (0x2c4)
@@ -1199,11 +1252,11 @@ int do_version(void)
 
 
 
-   // Args: 
+   // Args:
    xpc_dictionary_set_uint64(dict, "routine",ROUTINE_VERSION); // routine   (0x33c)
-   xpc_dictionary_set_uint64 (dict, "handle", 0);               
-   xpc_dictionary_set_bool (dict, "version", 1);  // without this launchd would print system              
-   xpc_dictionary_set_uint64 (dict, "type", 1);               
+   xpc_dictionary_set_uint64 (dict, "handle", 0);
+   xpc_dictionary_set_bool (dict, "version", 1);  // without this launchd would print system
+   xpc_dictionary_set_uint64 (dict, "type", 1);
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);                // subsystem (3)
    xpc_dictionary_set_fd(dict, "fd",1);                             // out fd
 
@@ -1229,11 +1282,11 @@ int do_variant(void)
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
 
-   // Args: 
+   // Args:
    xpc_dictionary_set_uint64(dict, "routine",ROUTINE_VERSION); // routine   (0x33c)
-   xpc_dictionary_set_uint64 (dict, "handle", 0);               
-   xpc_dictionary_set_bool (dict, "variant", 1);  // without this launchd would print system              
-   xpc_dictionary_set_uint64 (dict, "type", 1);               
+   xpc_dictionary_set_uint64 (dict, "handle", 0);
+   xpc_dictionary_set_bool (dict, "variant", 1);  // without this launchd would print system
+   xpc_dictionary_set_uint64 (dict, "type", 1);
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);                // subsystem (3)
    xpc_dictionary_set_fd(dict, "fd",1);                             // out fd
 
@@ -1320,13 +1373,13 @@ int do_lookup (char *EndpointName, int Uid)
 
 	uint32_t flags = 0x8;
 	printf("UID: %d.. Flags: %d.. Name: %s\n", Uid, flags, EndpointName);
-	
+
    xpc_object_t dict = xpc_dictionary_create(NULL,  // const char * const *keys,
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
 
    // And here are the human readable arguments:
-   // Args: 
+   // Args:
    xpc_dictionary_set_uint64(dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_uint64(dict, "flags",flags);                      // set to 8
    xpc_dictionary_set_uint64(dict, "type",1);                      // set to 1
@@ -1347,12 +1400,12 @@ int do_lookup (char *EndpointName, int Uid)
 	else
 	{
 		// We actually got a reply! The port we need is in "port"..
-		
+
        		xpc_object_t portAsXPCObject = xpc_dictionary_get_value (outDict, "port");
 		if (portAsXPCObject) printf ("Got port 0x%x\n",  * ((uint32_t *)portAsXPCObject));
-		
-		
-		
+
+
+
 
 	}
        return (err);
@@ -1399,19 +1452,19 @@ int do_submit	(char *Program, int KeepAlive)
                                              NULL, // const xpc_object_t *values,
                                              0);   // size_t count);
 
-   
+
    xpc_dictionary_set_bool   (submitJob, "KeepAlive", KeepAlive);
    xpc_dictionary_set_string (submitJob, "Program", Program);
    xpc_dictionary_set_string (submitJob, "Label", "xxx");
 
- 
+
    xpc_object_t programArguments = xpc_array_create(NULL, 0);
    xpc_dictionary_set_value  (submitJob, "ProgramArguments", programArguments);
 
    xpc_dictionary_set_value (request, "SubmitJob", submitJob);
    xpc_dictionary_set_value (dict, "request", request);
-  
-   // Args: 
+
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 7);               // subsystem (7)
    xpc_dictionary_set_uint64(dict, "type",7);                      // set to 7
    xpc_dictionary_set_uint64(dict, "handle",0); 		   // can be 0
@@ -1438,7 +1491,7 @@ int do_enable(char *Service, int Enable)
 {
 
 	if (!Service) return -1;
-	
+
 #if 0
 Mon Oct  9 16:25:32 2017 ==pr==> <pipe: 0x7fbbf94020c0> { name =  }
 --- Dictionary 0x7fbbf94025c0, 6 values:
@@ -1462,8 +1515,8 @@ Mon Oct  9 16:25:32 2017 ==pr==> <pipe: 0x7fbbf94020c0> { name =  }
 
    xpc_dictionary_set_value (dict, "names", names);
 
-  
-   // Args: 
+
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
 	// xpc_dictionary_set_bool(dict, "legacy", true);
    xpc_dictionary_set_uint64(dict, "type",1);                      // set to 1
@@ -1494,7 +1547,7 @@ int do_load(char *Plist, int Legacy)
 {
 
 	if (!Plist) return -1;
-	
+
 #if 0
 
 
@@ -1521,8 +1574,8 @@ DESC: <string: 0x7fd9d3402850> { length = 12, contents = "/tmp/c.plist" }
 
    xpc_dictionary_set_value (dict, "paths", paths);
 
-  
-   // Args: 
+
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_bool(dict, "enable", false);
 	if (Legacy) xpc_dictionary_set_bool(dict, "legacy", true);
@@ -1551,7 +1604,7 @@ DESC: <string: 0x7fd9d3402850> { length = 12, contents = "/tmp/c.plist" }
 int do_unload(char *Plist, int Legacy)
 {
 
-	
+
 #if 0
 subsystem: 3
   handle: 0
@@ -1567,7 +1620,7 @@ subsystem: 3
                                              NULL, // const xpc_object_t *values,
 	 				     0);   // size_t count);
 
-	
+
 
 if (Plist) {
    xpc_object_t s = xpc_string_create(Plist);
@@ -1576,8 +1629,8 @@ if (Plist) {
 }
 
 
-  
-   // Args: 
+
+   // Args:
    xpc_dictionary_set_uint64 (dict, "subsystem", 3);               // subsystem (3)
    xpc_dictionary_set_bool(dict, "disable", false);
 	if (Legacy) xpc_dictionary_set_bool(dict, "legacy", true);
@@ -1656,7 +1709,7 @@ int command_disable(int a, int b, int argc, char **argv)
 int command_wholaunched (int a, int b, int argc, char **argv){
 
 	return (do_wholaunched(argv[2]));
-	
+
 
 }
 
@@ -1723,13 +1776,13 @@ int command_examine (int a, int b, int argc , char **argv)
 
 	return (do_examine());
 
-} // examine 
+} // examine
 int command_dumpstate (int a, int b, int argc , char **argv)
 {
 
 	return (do_dumpstate());
 
-} 
+}
 
 int command_list (int a, int b, int argc , char **argv)
 {
@@ -1787,13 +1840,13 @@ int command_attrs (int a, int b, int argc, char **argv)
 
 int command_dumpjpcategory (int a , int b, int argc, char **argv)
 {
-	
+
 	if (argc != 1) return (64); // or something like that
 	return (do_dumpjpcategory());
 }
 int command_submit (int a , int b, int argc, char **argv)
 {
-	
+
 	if (argc < 2) return (64); // or something like that
 	return (do_submit(argv[2], 0));
 }
@@ -1809,7 +1862,7 @@ int command_runstats (int a, int b, int argc , char **argv)
 
 int command_print_cache (int a, int b, int argc , char **argv)
 {
-	
+
 	return (do_print_cache());
 
 
@@ -1817,7 +1870,7 @@ int command_print_cache (int a, int b, int argc , char **argv)
 
 int command_print_disabled (int a, int b, int argc , char **argv)
 {
-	
+
 	int Uid = 0; // or 501, or what not..
 	char *u = getenv ("uid");
 	if (u) sscanf (u, "%d", &Uid);
@@ -1878,7 +1931,7 @@ int command_hostinfo (int a, int b, int argc , char **argv)
 struct commpage {
 
 // Uncovered by disassembling launchctl in the 10.11 version. Look for "comm page"
-// and you'll see the address is loaded into %r13, with clear offsets 
+// and you'll see the address is loaded into %r13, with clear offsets
 // The printf format specifiers yield the exact field sizes (as do the diffs in offsets)
 
 #pragma pack(1)
@@ -1896,7 +1949,7 @@ struct commpage {
 
 	uint8_t		active_cpu_count;	/* 0x34*/
 	uint8_t		physical_cpu_count;
-	uint8_t		logical_cpu_count; 
+	uint8_t		logical_cpu_count;
 	uint8_t		unusedAsWell;	     /* 0x37*/
 	uint64_t	page_memory_size;    /* 0x38 */
 #ifdef ARM
@@ -1955,18 +2008,23 @@ struct commpage {
 #define CSR_ALLOW_ANY_RECOVERY_OS       (1 << 8)
 #define CSR_ALLOW_UNAPPROVED_KEXTS      (1 << 9)
 
+	if (!csr_check) {
+		csr_check = dlsym(RTLD_NEXT,"csr_check");
+	}
 
-	printf("allows untrusted kernel extensions = %d\n", (csr_check(CSR_ALLOW_UNTRUSTED_KEXTS) == 0 ? 1 :0));
-	printf("allows unrestricted filesystem access = %d\n", (csr_check(CSR_ALLOW_UNRESTRICTED_FS ) == 0 ? 1 : 0));
-	printf("allows task_for_pid = %d\n", (csr_check(CSR_ALLOW_TASK_FOR_PID) == 0 ? 1 : 0));
-	printf("allows kernel debugging = %d\n", (csr_check(CSR_ALLOW_KERNEL_DEBUGGER) == 0 ? 1 : 0));
-	printf("allows apple-internal = %d\n", (csr_check(CSR_ALLOW_APPLE_INTERNAL  ) == 0 ? 1 : 0));
-	printf("allows unrestricted dtrace = %d\n", (csr_check(CSR_ALLOW_UNRESTRICTED_DTRACE) == 0 ? 1 : 0));
-	printf("allows device configuration = %d\n", (csr_check(CSR_ALLOW_DEVICE_CONFIGURATION ) == 0 ? 1 : 0));
-	printf("allows any recovery os = %d\n", (csr_check(CSR_ALLOW_ANY_RECOVERY_OS) == 0 ? 1 : 0));
-	printf("allows unapproved kexts = %d\n", (csr_check(CSR_ALLOW_UNAPPROVED_KEXTS) == 0 ? 1 : 0));
+	if (csr_check) {
+		printf("allows untrusted kernel extensions = %d\n", (csr_check(CSR_ALLOW_UNTRUSTED_KEXTS) == 0 ? 1 :0));
+		printf("allows unrestricted filesystem access = %d\n", (csr_check(CSR_ALLOW_UNRESTRICTED_FS ) == 0 ? 1 : 0));
+		printf("allows task_for_pid = %d\n", (csr_check(CSR_ALLOW_TASK_FOR_PID) == 0 ? 1 : 0));
+		printf("allows kernel debugging = %d\n", (csr_check(CSR_ALLOW_KERNEL_DEBUGGER) == 0 ? 1 : 0));
+		printf("allows apple-internal = %d\n", (csr_check(CSR_ALLOW_APPLE_INTERNAL  ) == 0 ? 1 : 0));
+		printf("allows unrestricted dtrace = %d\n", (csr_check(CSR_ALLOW_UNRESTRICTED_DTRACE) == 0 ? 1 : 0));
+		printf("allows device configuration = %d\n", (csr_check(CSR_ALLOW_DEVICE_CONFIGURATION ) == 0 ? 1 : 0));
+		printf("allows any recovery os = %d\n", (csr_check(CSR_ALLOW_ANY_RECOVERY_OS) == 0 ? 1 : 0));
+		printf("allows unapproved kexts = %d\n", (csr_check(CSR_ALLOW_UNAPPROVED_KEXTS) == 0 ? 1 : 0));
+	}
 
-	// Do 10.11 and iOS 9 comm page 
+	// Do 10.11 and iOS 9 comm page
 	printf("comm page = { (Address: 0x%llx)\n", COMMPAGE_ADDRESS);
 
 	struct commpage *cp = (struct commpage *) COMMPAGE_ADDRESS;
@@ -2016,14 +2074,14 @@ struct commpage {
 		cp->whateverSomeMore[0],
 		cp->whateverSomeMore[1],
 		cp->whateverSomeMore[2]);
-#endif 
+#endif
 	printf ("\t}");
-		
+
 	printf("\tcpu family = 0x%x\n", cp->cpu_family);
 	printf("\tfirmware debug flags = 0x%x (0x%llx)\n", cp->firmware_debug_flags, &(cp->firmware_debug_flags));
 	printf("\ttimebase offset = 0x%llx\n", cp->timebase_offset);
 	printf("\tuser timebase = 0x%llx\n", cp->user_timebase);
-	
+
 #else
 	printf("\tcpu family = 0x%x\n", cp->cpu_family);
 	printf("\tnanotime base = 0x%llx\n", cp->nanotime_base);
@@ -2039,7 +2097,7 @@ struct commpage {
 		//offsetof(struct commpage, is_development_build));
 
 	printf("\n}\n");
-	
+
 	return (0);
 
 
@@ -2068,7 +2126,7 @@ int command_vproc_test (int a, int b, int argc , char **argv)
 {
 
 	uint64_t pid = 0;
-	int i = 0; 
+	int i = 0;
 	char *val = NULL;
 	for ( i = 0 ; i < 27; i++) {
 		pid = 0;
@@ -2079,7 +2137,7 @@ int command_vproc_test (int a, int b, int argc , char **argv)
 		printf("HERE RC: %d \n", rc);
 		val = NULL;
 
-		
+
 	}
 	return 0;
 
@@ -2092,11 +2150,11 @@ int command_managername (int a, int b, int argc, char **argv)
 	int rc = vproc_swap_string (NULL, 6, NULL, &name);
 	if (rc)
 	{
-		fprintf(stderr, "Could not get manager name.\n");	
+		fprintf(stderr, "Could not get manager name.\n");
 		exit (rc);
 	}
 	printf ("%s\n", name);
-	
+
 
 	return 0;
 
@@ -2107,11 +2165,11 @@ int command_managerpid (int a, int b, int argc, char **argv)
 	int rc = vproc_swap_integer (NULL, 4, NULL, &pid);
 	if (rc)
 	{
-		fprintf(stderr, "Could not get manager PID.\n");	
+		fprintf(stderr, "Could not get manager PID.\n");
 		exit (rc);
 	}
 	printf ("%d\n", pid);
-	
+
 
 	return 0;
 
@@ -2123,11 +2181,11 @@ int command_manageruid (int a, int b, int argc, char **argv)
 	int rc = vproc_swap_integer (NULL, 3, NULL, &pid);
 	if (rc)
 	{
-		fprintf(stderr, "Could not get manager PID.\n");	
+		fprintf(stderr, "Could not get manager PID.\n");
 		exit (rc);
 	}
 	printf ("%d\n", pid);
-	
+
 
 	return 0;
 
@@ -2135,9 +2193,9 @@ int command_manageruid (int a, int b, int argc, char **argv)
 
 int command_error (int a, int b, int argc , char **argv)
 {
-   
+
    if (argc < 2) {usage ("error"); return (64);}
- 
+
    if (strcmp(argv[2],"posix") == 0) {
 
  	}
@@ -2147,7 +2205,7 @@ int command_error (int a, int b, int argc , char **argv)
    if (strcmp(argv[2],"bootstrap") == 0) {
 
  	}
-   
+
    int err = strtol (argv[2], 0,0);
 
    printf ("%d: %s\n",err,  xpc_strerror (err));
@@ -2166,9 +2224,9 @@ int command_help (int a, int b, int argc, char **argv)
 		command_table[cmd].command;
 		cmd++)
 		{
-		
+
 		   printf("\t%-16s%s\n",
-			   command_table[cmd].command, 
+			   command_table[cmd].command,
 			        command_table[cmd].shortHelp);
 
 		}
@@ -2193,7 +2251,7 @@ int command_help (int a, int b, int argc, char **argv)
 
 struct command command_table[] =
 {
-	
+
 	{ "bootstrap", "Bootstraps a domain or a service into a domain.", "<a.plist>", command_bootstrap },
 	{ "bootout", "Tears down a domain or removes a service from a domain.", "<a.plist>", command_bootout },
 	{ "enable", "Enables an existing service.", "<service-target>", command_enable},
@@ -2208,7 +2266,7 @@ struct command command_table[] =
 	{ "hostinfo", "Prints port information about the host.", "", command_hostinfo },
 	{ "limit", "Reads or modifies launchd's resource limits.", "[<limit-name> [<both-limits> | <soft-limit> <hard-limit>]", command_limit},
 	{ "runstats", "Prints performance statistics for a service.", "<service-target>", command_runstats },
-	{ "examine", "Runs the specified analysis tool against launchd in a non-reentrant manner.", "[<tool> [arg0, arg1, ... , @PID, ...]]\nWith no arguments, causes launchd to fork(2) itself for examination by\nsubsequent analysis tools and prints the PID of this instance to stdout. You\nare responsible for killing this instance.\nAlternatively, the arguments to this subcommand consist of an invocation of a\ntool with which to examine launchd, with the argument for the PID or process\nname replaced with the \"@PID\" argument. So to examine launchd for leaks, the\ninvocation would be:\n$ launchctl examine leaks @PID\n\n\nNote this won't work on RELEASE launchd. If someone has a DEVELOPMENT build, J is extremely interested - let him know :-)" , command_examine }, 
+	{ "examine", "Runs the specified analysis tool against launchd in a non-reentrant manner.", "[<tool> [arg0, arg1, ... , @PID, ...]]\nWith no arguments, causes launchd to fork(2) itself for examination by\nsubsequent analysis tools and prints the PID of this instance to stdout. You\nare responsible for killing this instance.\nAlternatively, the arguments to this subcommand consist of an invocation of a\ntool with which to examine launchd, with the argument for the PID or process\nname replaced with the \"@PID\" argument. So to examine launchd for leaks, the\ninvocation would be:\n$ launchctl examine leaks @PID\n\n\nNote this won't work on RELEASE launchd. If someone has a DEVELOPMENT build, J is extremely interested - let him know :-)" , command_examine },
 	{ "dumpstate", "Dumps launchd state to stdout.",  "", command_dumpstate },
 
 //#ifdef ARM // no longer iOS only as of MacOS 12 or 13?
@@ -2240,12 +2298,12 @@ struct command command_table[] =
 	{ "help", "Prints the usage for a given subcommand.", "<subcommand>", command_help },
 
 	//{ "wholaunched", "Prints the bootstrap information for a launched service", "<pid>", command_wholaunched },
-	
+
 	// { "attrs",  "Get attrs for a service", "<label>", command_attrs },
 
-	
 
-#ifdef ARM 
+
+#ifdef ARM
   	{ "lookup", "Lookup Mach/XPC endpoint by name (new command, for iOS).", "[service-name]", command_lookup } ,
 #endif
 	{ "status", "New: checks service status", "[service-name]", command_status },
@@ -2297,10 +2355,10 @@ int main (int argc , char **argv)
 
 
    // If we're here, do what launchctl does - dump help
-   (void) command_help (0, 0, 0, argv); 
+   (void) command_help (0, 0, 0, argv);
 	exit(1);
 #ifdef JDEBUG
-     
+
 
 	extern xpc_object_t xpc_coalition_copy_info(int cid);
 
@@ -2328,7 +2386,7 @@ int main (int argc , char **argv)
  // 142 - Operation only supported on development builds
 
 
-	// Bonus - spawn_via_launchd 
+	// Bonus - spawn_via_launchd
 	char *session = strdup ("[0x0-0x43043].com.apple.Preview");
 	char **args = (char**) calloc(sizeof(char *),3);
 	args[0] = strdup (argv[1]);
@@ -2341,4 +2399,3 @@ extern int _spawn_via_launchd (char *Label, char **args, void *whatever, int ver
 
 
 #endif
-
